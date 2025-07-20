@@ -18,16 +18,9 @@ def run_fdmi_app():
 - The results table shows features for every segment, channel, and file.
 """)
 
-    # Try to load the image and show a friendly error if it fails
-    try:
-        st.image("/Users/wankhai/Documents/EEGDashboard/FDSignals.png", caption="Frequency Domain EEG Signals", use_container_width=True)
-    except Exception as e:
-        st.warning(f"Could not load image: {e}")
     uploaded_zip = st.file_uploader("Upload ZIP file containing EEG CSVs (organized by class folders)", type=["zip"])
-
     fs = st.number_input("Sampling Frequency (Hz)", min_value=1, value=128)
     n_segments = st.number_input("Number of Segments", min_value=1, value=5)
-
     all_freq_features = []
     error_files = []
 
@@ -65,42 +58,51 @@ def run_fdmi_app():
                             seg_data = data[:, start:stop]
                             for ch_idx, ch_name in enumerate(ch_names):
                                 signal = seg_data[ch_idx]
+                                if len(signal) <= 27:
+                                    continue  # Skip segments that are too short
+                                # Cache filtered signals and band powers for this segment/channel
+                                band_results = {}
                                 for band, (low, high) in band_ranges.items():
-                                    if len(signal) <= 27:
-                                        continue  # Skip segments that are too short
                                     try:
                                         filtered = bandpass_filter(signal, low, high, fs)
                                         bp, ent, cent, peak, meanf, medf = extract_freq_features(filtered, fs)
-                                        total_power = np.sum([
-                                            extract_freq_features(bandpass_filter(signal, l, h, fs), fs)[0]
-                                            for l, h in band_ranges.values() if len(signal) > 27
-                                        ])
-                                        rel_power = bp / total_power if total_power != 0 else 0
-                                        # Calculate band ratios
-                                        alpha_power = extract_freq_features(bandpass_filter(signal, band_ranges['alpha'][0], band_ranges['alpha'][1], fs), fs)[0] if len(signal) > 27 else 0
-                                        beta_power = extract_freq_features(bandpass_filter(signal, band_ranges['beta'][0], band_ranges['beta'][1], fs), fs)[0] if len(signal) > 27 else 0
-                                        theta_power = extract_freq_features(bandpass_filter(signal, band_ranges['theta'][0], band_ranges['theta'][1], fs), fs)[0] if len(signal) > 27 else 0
-                                        alpha_beta_ratio = alpha_power / beta_power if beta_power != 0 else 0
-                                        theta_beta_ratio = theta_power / beta_power if beta_power != 0 else 0
-                                        all_freq_features.append({
-                                            "file": csv_name,
-                                            "class": class_label,
-                                            "segment": seg_idx + 1,
-                                            "channel": ch_name,
-                                            "band": band,
+                                        band_results[band] = {
+                                            "filtered": filtered,
                                             "band_power": bp,
-                                            "relative_power": rel_power,
-                                            "alpha_beta_ratio": alpha_beta_ratio,
-                                            "theta_beta_ratio": theta_beta_ratio,
                                             "spectral_entropy": ent,
                                             "centroid": cent,
                                             "peak_freq": peak,
                                             "mean_freq": meanf,
                                             "median_freq": medf
-                                        })
+                                        }
                                     except Exception as e:
                                         error_files.append(f"{csv_name} segment {seg_idx+1} channel {ch_name} band {band}: {e}")
                                         continue
+                                # Compute total power and ratios only once per segment/channel
+                                total_power = np.sum([res["band_power"] for res in band_results.values()])
+                                alpha_power = band_results.get('alpha', {}).get('band_power', 0)
+                                beta_power = band_results.get('beta', {}).get('band_power', 0)
+                                theta_power = band_results.get('theta', {}).get('band_power', 0)
+                                alpha_beta_ratio = alpha_power / beta_power if beta_power != 0 else 0
+                                theta_beta_ratio = theta_power / beta_power if beta_power != 0 else 0
+                                for band, res in band_results.items():
+                                    rel_power = res["band_power"] / total_power if total_power != 0 else 0
+                                    all_freq_features.append({
+                                        "file": csv_name,
+                                        "class": class_label,
+                                        "segment": seg_idx + 1,
+                                        "channel": ch_name,
+                                        "band": band,
+                                        "band_power": res["band_power"],
+                                        "relative_power": rel_power,
+                                        "alpha_beta_ratio": alpha_beta_ratio,
+                                        "theta_beta_ratio": theta_beta_ratio,
+                                        "spectral_entropy": res["spectral_entropy"],
+                                        "centroid": res["centroid"],
+                                        "peak_freq": res["peak_freq"],
+                                        "mean_freq": res["mean_freq"],
+                                        "median_freq": res["median_freq"]
+                                    })
             progress.progress(1.0, text="Processing complete!")
             if error_files:
                 st.error(f"Errors occurred in the following files/segments:\n" + "\n".join(error_files))
