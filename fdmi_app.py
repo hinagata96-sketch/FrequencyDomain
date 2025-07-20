@@ -148,3 +148,7 @@ def run_fdmi_app():
         st.download_button(f"Download Features CSV for {selected_band} Band", data=csv, file_name=f"features_{selected_band}.csv", mime="text/csv")
     else:
         st.info("No features found for the selected band or file. Please check your data and selection.")
+
+# Ensure the app runs when executed
+if __name__ == "__main__":
+    run_fdmi_app()
